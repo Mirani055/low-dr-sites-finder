@@ -1,0 +1,12 @@
+url        http://localhost:8502
+http       200
+load       1058ms
+title      "Link Loot"
+bodyChars  131
+patchright C:\Users\HP\.vscode\extensions\danielsanmedium.dscodegpt-3.24.75\standalone/
+text       Search settings Services Web search: Ready Domain rating: Ready Contact details are collected from public website pages. Deploy
+eval       "EVAL ERROR: Error: page.evaluate: SyntaxError: Unexpected token ')'"
+
+console errors/warnings (0):
+
+requests failed (0):

@@ -1,0 +1,10 @@
+.env
+.venv/
+.venv-1/
+__pycache__/
+*.py[cod]
+link_loot_leads*.xlsx
+low_dr_leads*.xlsx
+
+# IMPORTANT: Kabhi bhi ye file GitHub pe mat daalo - API keys hain isme!
+.streamlit/secrets.toml
