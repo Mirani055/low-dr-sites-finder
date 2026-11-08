@@ -39,6 +39,12 @@ OPAGERANK_API_KEY = _get_secret("OPAGERANK_API_KEY")
 HUNTER_API_KEY = _get_secret("HUNTER_API_KEY")
 
 # ==========================================
+# Supabase PostgreSQL Database (Leads Storage)
+# ==========================================
+SUPABASE_URL = _get_secret("SUPABASE_URL")
+SUPABASE_KEY = _get_secret("SUPABASE_KEY")
+
+# ==========================================
 # Tool Settings
 # ==========================================
 MAX_WEBSITES_TO_CHECK = 50     # Kitni websites check karni hain per country

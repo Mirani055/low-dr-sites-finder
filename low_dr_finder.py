@@ -470,9 +470,23 @@ def main():
     
     # Step 2: DR check + Contact scrape
     results = process_websites(websites, check_dr=has_dr_api)
+    for r in results:
+        r["niche"] = niche
+        r["country"] = country
+        if city:
+            r["city"] = city
     
     # Step 3: Excel save
     save_excel(results)
+
+    # Step 4: Supabase sync (if configured)
+    try:
+        from supabase_db import is_supabase_configured, save_leads_to_supabase
+        if is_supabase_configured():
+            count, msg = save_leads_to_supabase(results, niche=niche, country=country, city=city)
+            print(f"🗄️ Supabase: {msg}")
+    except Exception as e:
+        print(f"⚠️ Supabase sync skipped: {e}")
     
     print(f"\n✅ Done in {time.time() - start:.1f} seconds")
     print("\n📝 Attribution: Domain Rating by Ahrefs (https://ahrefs.com/)")
