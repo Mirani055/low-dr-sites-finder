@@ -1,5 +1,19 @@
 # Link Loot
 
+Find low-DR websites for local SEO & outreach — with email, phone, WhatsApp and socials attached.
+
+## Accounts update (multi-user)
+
+- **Sign up / Log in** with Supabase Auth. Every user gets a **private dashboard**: their hunts and leads are saved with their `user_id`, and no user can see another user's leads.
+- Regular users see only **Hunt Leads** and **My Leads**. The database browser and the Setup & SQL pages are **admin-only**.
+- **Admin dashboard:** accounts whose email is listed in the `ADMIN_EMAILS` secret see an extra **Admin** tab inside the app (all users, all leads, system setup). A standalone version also exists in `admin_dashboard.py` — deploy it as a second Streamlit Cloud app (same repo, main file `admin_dashboard.py`, same secrets) if you want a separate admin link.
+
+### One-time setup for accounts
+
+1. In the Supabase SQL Editor, run `supabase_schema.sql` (v1, if not done) and then `supabase_schema_v2.sql` (adds `user_id`/`user_email` to leads, per-user unique leads, and the `profiles` table).
+2. In Supabase → **Authentication → Providers**, make sure **Email** sign-in is enabled. If you don't want users to confirm their email before first login, turn **Confirm email** off in the same place.
+3. In Streamlit Secrets add: `ADMIN_EMAILS = "your-email@example.com"` (comma-separated for multiple admins).
+
 ## Run on Windows
 
 1. Install Python 3.10 or newer.

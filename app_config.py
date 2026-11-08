@@ -64,6 +64,18 @@ SUPABASE_URL = _get_secret("SUPABASE_URL")
 SUPABASE_KEY = _get_secret("SUPABASE_KEY")
 
 # ==========================================
+# Admin Access
+# ==========================================
+# Comma-separated email addresses that get the Admin dashboard.
+# Set ADMIN_EMAILS in Streamlit Secrets (share.streamlit.io -> App -> Settings -> Secrets), e.g.
+# ADMIN_EMAILS = "you@example.com"
+ADMIN_EMAILS = [
+    email.strip().lower()
+    for email in _get_secret("ADMIN_EMAILS").split(",")
+    if email.strip()
+]
+
+# ==========================================
 # Tool Settings
 # ==========================================
 MAX_WEBSITES_TO_CHECK = 50     # Kitni websites check karni hain per country

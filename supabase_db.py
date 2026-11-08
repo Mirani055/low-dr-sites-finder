@@ -29,11 +29,11 @@ def _clean_base_url() -> str:
     return url
 
 
-def _get_headers() -> Dict[str, str]:
+def _get_headers(access_token: Optional[str] = None) -> Dict[str, str]:
     """Build standard Supabase PostgREST authentication headers."""
     return {
         "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Authorization": f"Bearer {access_token or SUPABASE_KEY}",
         "Content-Type": "application/json",
     }
 
@@ -65,6 +65,8 @@ def _format_lead_for_db(
     niche: str = "",
     country: str = "",
     city: str = "",
+    user_id: Optional[str] = None,
+    user_email: str = "",
 ) -> Dict[str, Any]:
     """Convert a lead dictionary into a clean row matching the Supabase leads table."""
     emails = lead.get("emails", "")
@@ -80,7 +82,7 @@ def _format_lead_for_db(
         except (ValueError, TypeError):
             dr_score = None
 
-    return {
+    row = {
         "niche": (lead.get("niche") or niche or "").strip(),
         "country": (lead.get("country") or country or "").strip(),
         "city": (lead.get("city") or city or "").strip(),
@@ -100,6 +102,13 @@ def _format_lead_for_db(
         "dr_status": lead.get("dr_status") or "",
         "scrape_status": lead.get("scrape_status") or "",
     }
+    # Per-user ownership (needs supabase_schema_v2.sql). Only added when known,
+    # so older databases without the columns keep working until migrated.
+    if user_id:
+        row["user_id"] = user_id
+    if user_email:
+        row["user_email"] = user_email
+    return row
 
 
 def save_leads_to_supabase(
@@ -107,6 +116,9 @@ def save_leads_to_supabase(
     niche: str = "",
     country: str = "",
     city: str = "",
+    user_id: Optional[str] = None,
+    user_email: str = "",
+    access_token: Optional[str] = None,
 ) -> Tuple[int, str]:
     """
     Save a batch of leads to Supabase 'leads' table.
@@ -119,7 +131,10 @@ def save_leads_to_supabase(
     if not leads:
         return 0, "No leads to save."
 
-    cleaned_rows = [_format_lead_for_db(lead, niche, country, city) for lead in leads]
+    cleaned_rows = [
+        _format_lead_for_db(lead, niche, country, city, user_id=user_id, user_email=user_email)
+        for lead in leads
+    ]
     # Filter out empty URLs or domains
     cleaned_rows = [row for row in cleaned_rows if row.get("url") or row.get("domain")]
 
@@ -127,11 +142,26 @@ def save_leads_to_supabase(
         return 0, "No valid lead rows to save."
 
     url = f"{_clean_base_url()}/rest/v1/leads"
-    headers = _get_headers()
+    headers = _get_headers(access_token)
     headers["Prefer"] = "resolution=merge-duplicates,return=representation"
 
     try:
         response = requests.post(url, headers=headers, json=cleaned_rows, timeout=20)
+
+        # v2 columns (user_id / user_email) not added yet -> retry without them
+        # so saving keeps working until the admin runs supabase_schema_v2.sql.
+        if response.status_code == 400 and user_id:
+            legacy_rows = [
+                {k: v for k, v in row.items() if k not in ("user_id", "user_email")}
+                for row in cleaned_rows
+            ]
+            response = requests.post(url, headers=headers, json=legacy_rows, timeout=20)
+            if response.status_code in (200, 201):
+                count = len(response.json()) if isinstance(response.json(), list) else len(legacy_rows)
+                return count, (
+                    f"Saved {count} leads to your account. "
+                    "Note for admin: run supabase_schema_v2.sql in Supabase to fully separate every user's leads."
+                )
         if response.status_code in (200, 201):
             inserted_count = len(response.json()) if isinstance(response.json(), list) else len(cleaned_rows)
             return inserted_count, f"Successfully saved {inserted_count} leads to Supabase."
@@ -158,6 +188,8 @@ def fetch_leads_from_supabase(
     max_dr: Optional[float] = None,
     with_email_only: bool = False,
     search_query: Optional[str] = None,
+    user_id: Optional[str] = None,
+    access_token: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
     """
     Fetch saved leads from Supabase with optional filters.
@@ -171,6 +203,10 @@ def fetch_leads_from_supabase(
         "order=created_at.desc",
         f"limit={limit}",
     ]
+
+    # Per-user isolation: a normal user only ever receives their own leads.
+    if user_id:
+        params.append(f"user_id=eq.{user_id}")
 
     if country and country != "All":
         params.append(f"country=eq.{requests.utils.quote(country)}")
@@ -192,20 +228,29 @@ def fetch_leads_from_supabase(
     url = f"{_clean_base_url()}/rest/v1/leads?{query_string}"
 
     try:
-        response = requests.get(url, headers=_get_headers(), timeout=15)
+        response = requests.get(url, headers=_get_headers(access_token), timeout=15)
         if response.status_code == 200:
             data = response.json()
             return data, f"Loaded {len(data)} leads from Supabase."
+        # user_id column missing (v2 SQL not run yet) -> fall back to unfiltered
+        # only when the caller is not relying on isolation being enforced by SQL.
+        if response.status_code == 400 and user_id:
+            fallback_query = "&".join(p for p in params if not p.startswith("user_id="))
+            fallback_url = f"{_clean_base_url()}/rest/v1/leads?{fallback_query}"
+            fallback = requests.get(fallback_url, headers=_get_headers(access_token), timeout=15)
+            if fallback.status_code == 200:
+                return fallback.json(), "Loaded leads (admin: run supabase_schema_v2.sql to enable per-user separation)."
         return [], f"Failed to load leads ({response.status_code}): {response.text[:200]}"
     except Exception as e:
         return [], f"Error querying Supabase: {e}"
 
 
-def get_database_stats() -> Dict[str, Any]:
+def get_database_stats(user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Fetch aggregate statistics about the database.
+    Pass user_id to scope the stats to a single user.
     """
-    leads, msg = fetch_leads_from_supabase(limit=2000)
+    leads, msg = fetch_leads_from_supabase(limit=2000, user_id=user_id)
     if not leads:
         return {
             "total_leads": 0,
@@ -230,12 +275,14 @@ def get_database_stats() -> Dict[str, Any]:
     }
 
 
-def delete_lead_by_id(lead_id: int) -> Tuple[bool, str]:
-    """Delete a lead record from Supabase by ID."""
+def delete_lead_by_id(lead_id: int, user_id: Optional[str] = None) -> Tuple[bool, str]:
+    """Delete a lead record from Supabase by ID (optionally scoped to its owner)."""
     if not is_supabase_configured():
         return False, "Supabase is not configured."
 
     url = f"{_clean_base_url()}/rest/v1/leads?id=eq.{lead_id}"
+    if user_id:
+        url += f"&user_id=eq.{user_id}"
     try:
         response = requests.delete(url, headers=_get_headers(), timeout=10)
         if response.status_code in (200, 204):
@@ -243,3 +290,58 @@ def delete_lead_by_id(lead_id: int) -> Tuple[bool, str]:
         return False, f"Failed to delete ({response.status_code}): {response.text[:200]}"
     except Exception as e:
         return False, f"Error deleting lead: {e}"
+
+
+# =============================================================
+#  ADMIN HELPERS
+# =============================================================
+
+def fetch_profiles() -> List[Dict[str, Any]]:
+    """List registered users from public.profiles (admin use). [] if not available."""
+    if not is_supabase_configured():
+        return []
+    url = f"{_clean_base_url()}/rest/v1/profiles?select=*&order=created_at.desc&limit=1000"
+    try:
+        response = requests.get(url, headers=_get_headers(), timeout=15)
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        pass
+    return []
+
+
+def get_admin_overview() -> Dict[str, Any]:
+    """
+    Aggregate platform-wide numbers for the Admin dashboard:
+    totals, per-user lead counts, per-niche and per-country counts.
+    """
+    leads, _ = fetch_leads_from_supabase(limit=5000)
+    profiles = fetch_profiles()
+
+    per_user: Dict[str, Dict[str, Any]] = {}
+    per_niche: Dict[str, int] = {}
+    per_country: Dict[str, int] = {}
+    for row in leads:
+        email = (row.get("user_email") or "— unassigned (before accounts) —")
+        bucket = per_user.setdefault(email, {"email": email, "leads": 0, "with_email": 0, "last_hunt": ""})
+        bucket["leads"] += 1
+        if row.get("emails"):
+            bucket["with_email"] += 1
+        created = row.get("created_at") or ""
+        if created > bucket["last_hunt"]:
+            bucket["last_hunt"] = created
+        if row.get("niche"):
+            per_niche[row["niche"]] = per_niche.get(row["niche"], 0) + 1
+        if row.get("country"):
+            per_country[row["country"]] = per_country.get(row["country"], 0) + 1
+
+    return {
+        "total_leads": len(leads),
+        "with_email": sum(1 for r in leads if r.get("emails")),
+        "low_dr": sum(1 for r in leads if r.get("dr_score") is not None and r["dr_score"] <= 30),
+        "total_users": len(profiles),
+        "profiles": profiles,
+        "per_user": sorted(per_user.values(), key=lambda b: b["leads"], reverse=True),
+        "per_niche": per_niche,
+        "per_country": per_country,
+    }
