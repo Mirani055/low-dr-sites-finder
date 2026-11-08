@@ -1,11 +1,18 @@
 import io
+import os
 from pathlib import Path
+import sys
 import time
+
+# Ensure application root directory is at the front of sys.path on Streamlit Cloud
+APP_ROOT = str(Path(__file__).resolve().parent)
+if APP_ROOT not in sys.path:
+    sys.path.insert(0, APP_ROOT)
 
 import pandas as pd
 import streamlit as st
 
-from config import (
+from app_config import (
     AHREFS_API_KEY,
     HUNTER_API_KEY,
     LOW_DR_THRESHOLD,

@@ -10,7 +10,7 @@ import requests
 import cloudscraper
 from bs4 import BeautifulSoup
 from urllib.parse import parse_qs, urljoin, urlparse
-from config import REQUEST_TIMEOUT, DELAY_BETWEEN_REQUESTS, HUNTER_API_KEY
+from app_config import REQUEST_TIMEOUT, DELAY_BETWEEN_REQUESTS, HUNTER_API_KEY
 
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 

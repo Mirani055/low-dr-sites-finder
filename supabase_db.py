@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 import requests
 
-from config import SUPABASE_KEY, SUPABASE_URL
+from app_config import SUPABASE_KEY, SUPABASE_URL
 
 
 def is_supabase_configured() -> bool:

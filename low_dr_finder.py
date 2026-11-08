@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 try:
-    from config import (
+    from app_config import (
         SERPER_API_KEY, MAX_WEBSITES_TO_CHECK, LOW_DR_THRESHOLD,
         OUTPUT_FILE, AHREFS_API_KEY
     )

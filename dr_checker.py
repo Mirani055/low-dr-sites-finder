@@ -5,7 +5,7 @@
 """
 
 import requests
-from config import AHREFS_API_KEY, OPAGERANK_API_KEY, REQUEST_TIMEOUT
+from app_config import AHREFS_API_KEY, OPAGERANK_API_KEY, REQUEST_TIMEOUT
 
 
 def check_ahrefs_dr(domain):
