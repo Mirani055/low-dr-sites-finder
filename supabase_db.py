@@ -20,8 +20,13 @@ def is_supabase_configured() -> bool:
 
 
 def _clean_base_url() -> str:
-    """Ensure URL does not have trailing slash."""
-    return SUPABASE_URL.rstrip("/") if SUPABASE_URL else ""
+    """Ensure URL is the base Supabase URL without trailing /rest/v1 or slash."""
+    if not SUPABASE_URL:
+        return ""
+    url = SUPABASE_URL.strip().rstrip("/")
+    if url.endswith("/rest/v1"):
+        url = url[:-len("/rest/v1")].rstrip("/")
+    return url
 
 
 def _get_headers() -> Dict[str, str]:
