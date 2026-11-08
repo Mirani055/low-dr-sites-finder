@@ -30,9 +30,9 @@ from supabase_db import (
     test_connection,
 )
 
-st.set_page_config(page_title="Link Loot Admin", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Link Loot Admin", page_icon=":material/admin_panel_settings:", layout="wide")
 
-st.title("🛡️ Link Loot — Admin Dashboard")
+st.title("Link Loot. Admin Dashboard")
 st.caption("Full platform control: users, all leads, and system health. This app is separate from the user dashboard.")
 
 user = st.session_state.get("auth_user")
@@ -63,8 +63,9 @@ if not is_admin(user):
     st.stop()
 
 with st.sidebar:
-    st.markdown(f"### 👤 {user.get('email')}")
-    st.success("🛡️ Admin")
+    st.markdown("### Account")
+    st.write(user.get("email", ""))
+    st.success("Administrator")
     if st.button("Log out", width="stretch"):
         st.session_state.pop("auth_user", None)
         st.rerun()
@@ -74,7 +75,7 @@ with st.sidebar:
     st.caption(f"Ahrefs (DR): {'set ✅' if AHREFS_API_KEY else 'missing ⚠️'}")
     st.caption(f"Hunter (email verify): {'set ✅' if HUNTER_API_KEY else 'not set'}")
     st.caption(f"Supabase: {'configured ✅' if is_supabase_configured() else 'missing ⚠️'}")
-    if st.button("🔌 Test Supabase connection"):
+    if st.button("Test Supabase connection"):
         success, message = test_connection()
         st.success(message) if success else st.error(message)
 
@@ -108,21 +109,21 @@ if all_leads:
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         display.to_excel(writer, index=False, sheet_name="All Leads")
     st.download_button(
-        "📥 Download all leads (Excel)",
+        "Download all leads as Excel",
         data=buffer.getvalue(),
         file_name="all_link_loot_leads.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     st.dataframe(display, width="stretch", hide_index=True)
 
-    with st.expander("🗑️ Delete a lead (any user)"):
+    with st.expander("Remove a lead belonging to any user"):
         options = {
             f"{row.get('user_email') or '—'} · {row.get('domain') or row.get('url')}": row.get("id")
             for row in all_leads if row.get("id") is not None
         }
         if options:
             chosen = st.selectbox("Choose a lead", options=list(options))
-            if st.button("Delete lead"):
+            if st.button("Remove lead"):
                 ok, message = delete_lead_by_id(options[chosen])
                 if ok:
                     st.success(message)

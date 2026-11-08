@@ -63,6 +63,15 @@ HUNTER_API_KEY = _get_secret("HUNTER_API_KEY")
 SUPABASE_URL = _get_secret("SUPABASE_URL")
 SUPABASE_KEY = _get_secret("SUPABASE_KEY")
 
+# Public URL of this app. Used as the redirect target in Supabase
+# confirmation emails, so verified users land back in the live app —
+# not on a localhost address. Override with the APP_URL secret if the
+# app address ever changes.
+APP_URL = _get_secret(
+    "APP_URL",
+    "https://low-dr-sites-finder-ydeycbdx2kjzsa6wqqxpsl.streamlit.app/",
+)
+
 # ==========================================
 # Admin Access
 # ==========================================

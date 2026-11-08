@@ -21,7 +21,14 @@ from app_config import (
     SUPABASE_KEY,
     SUPABASE_URL,
 )
-from auth import ensure_profile, is_admin, is_auth_configured, sign_in, sign_up
+from auth import (
+    ensure_profile,
+    is_admin,
+    is_auth_configured,
+    resend_confirmation,
+    sign_in,
+    sign_up,
+)
 from low_dr_finder import (
     COUNTRY_SEARCH_SETTINGS,
     find_websites,
@@ -40,30 +47,71 @@ from supabase_db import (
 
 
 st.set_page_config(
-    page_title="Link Loot — Low-DR Lead Finder",
+    page_title="Link Loot. Low DR Lead Finder",
     page_icon=":material/travel_explore:",
     layout="wide",
 )
 
-HERO_CSS = """
+STYLE_CSS = """
 <style>
-.linkloot-hero {
-    background: linear-gradient(120deg, #3B1470 0%, #6D3FA3 55%, #C2410C 130%);
-    border-radius: 16px;
-    padding: 28px 32px;
+.hero {
+    background: linear-gradient(120deg, #2E1065 0%, #5B2A9D 58%, #9A3412 135%);
+    border-radius: 18px;
+    padding: 40px 44px;
     color: #FFFFFF;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
-.linkloot-hero h1 { color: #FFFFFF; margin: 0 0 6px 0; font-size: 2.1rem; }
-.linkloot-hero p { color: #EDE7F7; margin: 0; font-size: 1.02rem; }
-.linkloot-hero .pill {
-    display: inline-block; background: rgba(255,255,255,0.16);
-    border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
-    padding: 2px 12px; margin: 10px 6px 0 0; font-size: 0.82rem; color: #FFF;
+.hero .kicker {
+    letter-spacing: 2.5px; font-size: 0.78rem; font-weight: 600;
+    color: #D8CCF2; text-transform: uppercase; margin-bottom: 10px;
 }
+.hero h1 { color: #FFFFFF; margin: 0 0 10px 0; font-size: 2.5rem; line-height: 1.15; }
+.hero p.lede { color: #EFEAF9; font-size: 1.08rem; margin: 0; max-width: 760px; line-height: 1.55; }
+.hero .facts { margin-top: 18px; color: #FFFFFF; font-size: 0.92rem; }
+.hero .facts span {
+    display: inline-block; border: 1px solid rgba(255,255,255,0.4);
+    border-radius: 999px; padding: 3px 14px; margin: 0 8px 6px 0;
+    background: rgba(255,255,255,0.10);
+}
+@keyframes riseIn {
+    from { opacity: 0; transform: translateY(26px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes drawCheck {
+    to { stroke-dashoffset: 0; }
+}
+@keyframes popIn {
+    0% { transform: scale(0.6); opacity: 0; }
+    70% { transform: scale(1.06); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+.welcome {
+    background: linear-gradient(130deg, #2E1065 0%, #5B2A9D 55%, #9A3412 140%);
+    border-radius: 22px; color: #FFFFFF; text-align: center;
+    padding: 56px 40px 46px 40px; margin-top: 18px;
+}
+.welcome .badge {
+    width: 92px; height: 92px; margin: 0 auto 22px auto;
+    animation: popIn 0.7s ease both;
+}
+.welcome .badge circle.bg { stroke: rgba(255,255,255,0.35); }
+.welcome .badge path.tick {
+    stroke-dasharray: 60; stroke-dashoffset: 60;
+    animation: drawCheck 0.6s ease 0.55s forwards;
+}
+.welcome h1 { color: #FFFFFF; animation: riseIn 0.7s ease 0.25s both; margin-bottom: 8px; }
+.welcome p.lede {
+    color: #EFEAF9; font-size: 1.06rem; max-width: 640px;
+    margin: 0 auto; line-height: 1.6; animation: riseIn 0.7s ease 0.45s both;
+}
+.welcome .points {
+    margin: 26px auto 4px auto; max-width: 620px; text-align: left;
+    animation: riseIn 0.7s ease 0.65s both; line-height: 1.75; color: #FFFFFF;
+}
+.welcome .signed { color: #CDBEF0; font-size: 0.9rem; margin-top: 18px; animation: riseIn 0.7s ease 0.85s both; }
 </style>
 """
-st.markdown(HERO_CSS, unsafe_allow_html=True)
+st.markdown(STYLE_CSS, unsafe_allow_html=True)
 
 LOGO_PATH = str(Path(__file__).with_name("link_loot.svg"))
 
@@ -73,20 +121,21 @@ def current_user():
 
 
 def do_logout():
-    for key in ("auth_user", "results", "export_name", "export_data", "supabase_sync_msg"):
+    for key in ("auth_user", "results", "export_name", "export_data", "supabase_sync_msg", "show_welcome"):
         st.session_state.pop(key, None)
     st.rerun()
 
 
 def build_excel_bytes(results):
-    """Build the Excel export in memory — one sheet per country.
+    """Build the Excel export in memory, with one sheet per country.
 
-    Per-user and per-session: nothing is written to a shared file on the
-    server, so two users hunting at the same time never mix workbooks.
+    The export belongs to the signed in user and is generated inside their
+    own session. Nothing is written to a shared file on the server, so two
+    people hunting at the same time can never receive each others workbook.
     """
     cols = [
         "country", "domain", "url", "title", "dr_score", "dr_source",
-        "emails", "email_status", "facebook", "linkedin", "instagram",
+        "emails", "facebook", "linkedin", "instagram",
         "twitter", "phone", "whatsapp", "dr_status", "scrape_status",
     ]
     frame = pd.DataFrame(results)
@@ -111,7 +160,6 @@ LEAD_DISPLAY_COLUMNS = {
     "dr_score": "DR",
     "dr_source": "DR source",
     "emails": "Emails",
-    "email_status": "Email verification",
     "facebook": "Facebook",
     "linkedin": "LinkedIn",
     "instagram": "Instagram",
@@ -123,154 +171,266 @@ LEAD_DISPLAY_COLUMNS = {
     "niche": "Niche",
     "city": "City",
     "user_email": "Owner",
-    "created_at": "Saved At",
+    "created_at": "Saved",
 }
+
+RESULT_COLUMN_ORDER = [
+    "country", "niche", "city", "domain", "url", "title", "dr_score",
+    "dr_source", "emails", "phone", "whatsapp",
+    "facebook", "linkedin", "instagram", "twitter",
+]
+
+
+def status_line(configured, what_it_does):
+    icon = ":material/check_circle:" if configured else ":material/error:"
+    word = "Operational" if configured else "Action required"
+    st.caption(f"{icon} **{word}.** {what_it_does}")
 
 
 def render_services_sidebar():
-    """Helpful, plain-language status of every connected service."""
-    st.markdown("### Services")
-    st.caption(
-        f"🔍 **Web search** — {'Ready ✅' if SERPER_API_KEY else 'API key needed ⚠️'}"
-        "\nFinds real local businesses on Google for your niche + city."
-    )
-    st.caption(
-        f"📊 **Ahrefs Domain Rating** — {'Ready ✅' if AHREFS_API_KEY else 'API key needed ⚠️'}"
-        "\nChecks each site's real DR so only low-DR, easy-to-pitch sites pass."
-    )
-    st.caption(
-        f"✉️ **Email finder & verifier** — {'Ready ✅' if HUNTER_API_KEY else 'Basic mode'}"
-        "\nCollects one domain-matching email per site. Hunter.io also verifies it when configured."
-    )
-    st.caption(
-        f"🗄️ **Your private lead vault** — {'Connected ✅' if is_supabase_configured() else 'Not configured ⚠️'}"
-        "\nEvery lead you hunt is saved to your own account. Nobody else can see your leads."
-    )
-    with st.expander("How Link Loot works"):
+    """Connected services, described in terms of what they do for the user."""
+    st.markdown("### Connected services")
+    st.markdown("**Google search**")
+    status_line(bool(SERPER_API_KEY), "Finds businesses that match your niche and location, using the phrases local customers actually search with.")
+    st.markdown("**Ahrefs domain rating**")
+    status_line(bool(AHREFS_API_KEY), "Rates the authority of every website found, so weak sites that need SEO surface first.")
+    st.markdown("**Contact discovery**")
+    status_line(True, "Reads each business website and its contact pages to collect an email address, phone number, WhatsApp and social profiles.")
+    st.markdown("**Private lead storage**")
+    status_line(is_supabase_configured(), "Saves every hunt to your account, so your leads are waiting for you whenever you sign in.")
+    with st.expander("Getting better results"):
         st.markdown(
-            "1. **Pick a niche + country** (add a city for laser-focused local leads).\n"
-            "2. **We search Google** with local service & pricing phrases buyers actually use.\n"
-            "3. **DR filter** drops strong sites you would waste time pitching.\n"
-            "4. **Contacts are scraped** — email, phone, WhatsApp and socials.\n"
-            "5. **Download Excel** or find everything later under **My Leads**."
-        )
-    with st.expander("Tips for better leads"):
-        st.markdown(
-            "- Start with **Max DR 20–30** — the easiest sites to win.\n"
-            "- One country + one city gives the most relevant local leads.\n"
-            "- Try niche variations: `dentist`, `dental clinic`, `cosmetic dentist`.\n"
-            "- Leads **with email + WhatsApp** reply the fastest — filter for them in My Leads."
+            "Set the maximum DR between 20 and 30. Those sites are established enough "
+            "to pay for SEO and weak enough to need it.\n\n"
+            "Choose one country and add a city when you want truly local clients. "
+            "A focused hunt returns more relevant businesses than a wide one.\n\n"
+            "Try more than one name for the same trade. Dentist, dental clinic and "
+            "cosmetic dentist reach different businesses.\n\n"
+            "Leads with both an email address and a WhatsApp number give you two "
+            "ways to start a conversation, and they tend to reply fastest."
         )
 
 
 # =============================================================
-#  PUBLIC HOME + LOGIN / SIGNUP
+#  WELCOME INTRO, SHOWN ONCE AFTER A SUCCESSFUL SIGN IN
+# =============================================================
+
+def render_welcome(user):
+    st.markdown(
+        f"""
+        <div class="welcome">
+            <div class="badge">
+                <svg viewBox="0 0 100 100" width="92" height="92" fill="none">
+                    <circle class="bg" cx="50" cy="50" r="45" stroke-width="3"/>
+                    <circle cx="50" cy="50" r="45" stroke="#FFFFFF" stroke-width="3"
+                        stroke-dasharray="283" stroke-dashoffset="283" opacity="0.9">
+                        <animate attributeName="stroke-dashoffset" from="283" to="0" dur="0.9s" fill="freeze"/>
+                    </circle>
+                    <path class="tick" d="M32 51 L45 64 L69 38" stroke="#FFFFFF"
+                        stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <h1>Congratulations, your account is ready</h1>
+            <p class="lede">
+                Welcome to Link Loot. Your email address is confirmed, your private
+                workspace is open, and from this moment everything you find here
+                belongs to you alone.
+            </p>
+            <div class="points">
+                <div>Search any niche in any supported country and receive businesses with low domain rating scores.</div>
+                <div>Every lead arrives with contact details, ready for outreach on the same day.</div>
+                <div>Your hunts save automatically to My Leads. No other account can see them.</div>
+            </div>
+            <div class="signed">Signed in as {user.get('email', '')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.write("")
+    _, button_col, _ = st.columns([1, 1, 1])
+    with button_col:
+        if st.button("Enter my dashboard", type="primary", width="stretch"):
+            st.session_state["show_welcome"] = False
+            st.rerun()
+
+
+# =============================================================
+#  PUBLIC HOME PAGE WITH SIGN IN AND SIGN UP
 # =============================================================
 
 def render_auth_page():
     with st.sidebar:
         st.image(LOGO_PATH, width=64)
-        st.markdown("### Why create an account?")
+        st.markdown("### Your account, your leads")
         st.markdown(
-            "- 🎯 **Your own dashboard** — your hunts, your leads, nobody else's\n"
-            "- 🔒 **Private by design** — a dentist hunt and a roofing hunt never mix\n"
-            "- 💾 **Leads saved automatically** — come back any time, download any time\n"
-            "- 🆓 **Free to start** — sign up in under a minute"
+            "Link Loot is built for professionals who sell SEO services. "
+            "An account gives you a private workspace where every search you run "
+            "and every lead you collect stays yours. Other users cannot see your "
+            "markets, your niches or your results, and your exports are generated "
+            "for you alone."
         )
         st.divider()
         render_services_sidebar()
 
     st.markdown(
         """
-        <div class="linkloot-hero">
-            <h1>🎯 Link Loot</h1>
-            <p>Find <b>low-DR websites</b> for local SEO &amp; outreach — with email, phone,
-            WhatsApp and socials already attached. The easiest clients to pitch, in any niche,
-            in any country.</p>
-            <span class="pill">✅ Real Ahrefs DR</span>
-            <span class="pill">✅ Contacts included</span>
-            <span class="pill">✅ Private dashboard</span>
-            <span class="pill">✅ Excel export</span>
+        <div class="hero">
+            <div class="kicker">Link Loot. Client acquisition for local SEO</div>
+            <h1>Find local businesses that need SEO, with the contact details to reach them.</h1>
+            <p class="lede">
+                Link Loot searches a market for independent businesses, screens every website
+                by its Ahrefs domain rating, and keeps only the low scoring sites that are
+                realistic to pitch. Each lead arrives with an email address, phone number,
+                WhatsApp and social profiles collected from the business itself, so a search
+                in the morning can become a conversation by the afternoon.
+            </p>
+            <div class="facts">
+                <span>Real Ahrefs DR on every lead</span>
+                <span>Contacts collected for you</span>
+                <span>A private dashboard per account</span>
+                <span>Excel export included</span>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    feat1, feat2, feat3 = st.columns(3)
-    feat1.markdown("#### 🎯 Low-DR, high chance\nStrong sites ignore cold outreach. Link Loot filters for **DR 0–30** sites that actually need SEO help — and reply.")
-    feat2.markdown("#### 📇 Contacts, not just URLs\nEvery lead comes with **email, phone, WhatsApp, Facebook, LinkedIn, Instagram & X** where available. Pitch the same day.")
-    feat3.markdown("#### 🔒 Yours alone\nYour searches and leads are tied to **your account only**. Another user's roofing hunt will never touch your dentist leads.")
+    st.markdown("### A lead is more than a web address")
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.markdown(":material/verified: **Authority you can trust**")
+        st.markdown(
+            "Domain rating decides who is worth your time. Strong sites rarely answer "
+            "cold outreach because they already rank. Link Loot verifies the DR of "
+            "every candidate with Ahrefs and keeps only the range you set, which by "
+            "default means scores of 30 or lower."
+        )
+    with col_b:
+        st.markdown(":material/contacts: **Contacts that start conversations**")
+        st.markdown(
+            "A list of domains is not a pipeline. Every lead is enriched from the "
+            "business website and its contact pages with an email address, phone "
+            "number, WhatsApp and links to Facebook, LinkedIn, Instagram and X "
+            "wherever the business publishes them."
+        )
+    with col_c:
+        st.markdown(":material/person_search: **Context for a relevant pitch**")
+        st.markdown(
+            "Each result carries the business name, its niche, city and country. "
+            "That context is what turns a generic message into a relevant one, and "
+            "relevant messages are the ones owners reply to."
+        )
+
+    st.markdown("### How Link Loot qualifies every lead")
+    step1, step2, step3, step4 = st.columns(4)
+    step1.markdown("**Step 1. Search with local intent**\n\nQueries are built from the phrases customers use when they are ready to buy a local service, in the language of the country you choose.")
+    step2.markdown("**Step 2. Authority screening**\n\nEvery website found is checked against Ahrefs. Anything above your maximum DR is removed before it reaches you.")
+    step3.markdown("**Step 3. Contact discovery**\n\nSurviving sites are visited and read. Contact details are taken only from pages the business publishes itself.")
+    step4.markdown("**Step 4. Private delivery**\n\nResults appear in your dashboard, save to My Leads under your account, and export to Excel with one sheet per country.")
 
     st.divider()
 
-    auth_col, how_col = st.columns([1.05, 1])
+    auth_col, side_col = st.columns([1.05, 1])
     with auth_col:
-        tab_login, tab_signup = st.tabs(["🔐 Log in", "✨ Create account"])
+        tab_login, tab_signup = st.tabs(["Sign in", "Create account"])
         with tab_login:
             with st.form("login_form"):
                 login_email = st.text_input("Email", placeholder="you@example.com")
                 login_password = st.text_input("Password", type="password")
-                login_submitted = st.form_submit_button("Log in", type="primary", width="stretch")
+                login_submitted = st.form_submit_button("Sign in", type="primary", width="stretch")
             if login_submitted:
                 if not login_email.strip() or not login_password:
-                    st.warning("Enter your email and password.")
+                    st.warning("Enter your email address and your password.")
                 else:
                     ok, message, user = sign_in(login_email, login_password)
                     if ok and user:
                         st.session_state["auth_user"] = user
+                        st.session_state["show_welcome"] = True
                         ensure_profile(user)
-                        st.success(message)
                         st.rerun()
                     else:
-                        st.error(message)
+                        st.error("We could not sign you in. Check your email address and password, and make sure your email address has been confirmed.")
+            st.caption("Confirmed your email address a moment ago? Sign in above and your dashboard will open.")
+            with st.expander("The confirmation link has expired"):
+                st.markdown(
+                    "Confirmation links work once and only for a limited time. Enter your "
+                    "email address and we will send a fresh one. Always use the newest "
+                    "link in your inbox."
+                )
+                with st.form("resend_form"):
+                    resend_email = st.text_input("Email", placeholder="you@example.com", key="resend_email")
+                    resend_submitted = st.form_submit_button("Send a new confirmation link", width="stretch")
+                if resend_submitted:
+                    if not resend_email.strip():
+                        st.warning("Enter the email address you signed up with.")
+                    else:
+                        ok, message = resend_confirmation(resend_email)
+                        if ok:
+                            st.success(message)
+                        else:
+                            st.error(message)
         with tab_signup:
             with st.form("signup_form"):
-                signup_name = st.text_input("Your name", placeholder="e.g. Ali Khan")
+                signup_name = st.text_input("Your name", placeholder="Full name")
                 signup_email = st.text_input("Email", placeholder="you@example.com", key="signup_email")
                 signup_password = st.text_input("Create a password", type="password", key="signup_password",
-                                                 help="At least 6 characters.")
-                signup_submitted = st.form_submit_button("Create my free account", type="primary", width="stretch")
+                                                 help="Use at least 6 characters.")
+                signup_submitted = st.form_submit_button("Create my account", type="primary", width="stretch")
             if signup_submitted:
                 if not signup_email.strip() or not signup_password:
-                    st.warning("Enter an email and a password to create your account.")
+                    st.warning("Enter an email address and a password to create your account.")
                 elif len(signup_password) < 6:
-                    st.warning("Password must be at least 6 characters.")
+                    st.warning("Your password needs at least 6 characters.")
                 else:
                     ok, message, user = sign_up(signup_email, signup_password, signup_name)
                     if ok and user:
                         st.session_state["auth_user"] = user
+                        st.session_state["show_welcome"] = True
                         ensure_profile(user)
-                        st.success(message)
                         st.rerun()
                     elif ok:
-                        st.success(message)
+                        st.success("Your account has been created. We have emailed you a confirmation link. Select it once, then sign in here and your dashboard will open.")
                     else:
                         st.error(message)
-            st.caption("By creating an account you get your own private dashboard. We never share your leads with other users.")
-    with how_col:
-        st.markdown("#### How it works")
+            st.caption("Creating an account opens your private workspace. Your leads are never shared with other users.")
+    with side_col:
+        st.markdown("#### Who uses Link Loot")
         st.markdown(
-            "**1. Sign up free** — your private dashboard is created instantly.\n\n"
-            "**2. Hunt a niche** — e.g. *dentist in Austin, USA* or *roofing in London, UK*.\n\n"
-            "**3. Get pitch-ready leads** — low-DR sites with contacts, saved to **My Leads**.\n\n"
-            "**4. Export & outreach** — download Excel and start pitching the same day."
+            "**Freelance SEO consultants** who need a steady flow of realistic first clients "
+            "without spending their week on manual prospecting.\n\n"
+            "**Local SEO agencies** building prospect lists for new service areas and new trades.\n\n"
+            "**Outreach and link building teams** who need low authority sites with a named "
+            "business and a working route to the owner."
         )
-        st.markdown("#### Who is it for?")
+        st.markdown("#### Your data stays yours")
         st.markdown(
-            "- SEO freelancers hunting their first (or next) clients\n"
-            "- Agencies building outreach & guest-post lists\n"
-            "- Local SEO specialists who need low-competition targets, fast"
+            "Accounts are separated at the data level. Your searches are saved against your "
+            "account only, your exports are generated inside your own session, and the "
+            "platform team can see totals for support purposes without your leads ever "
+            "appearing in another customer dashboard."
         )
-        with st.expander("FAQ"):
-            st.markdown(
-                "**Is my data shared with other users?** No. Every account sees only its own hunts and leads.\n\n"
-                "**What DR should I choose?** DR 0–30 is the sweet spot: real businesses with weak SEO.\n\n"
-                "**Do I need my own API keys?** No — search, DR checks and contact scraping are already connected.\n\n"
-                "**Can I export my leads?** Yes, one click downloads an Excel file, one sheet per country."
-            )
+
+    with st.expander("Questions, answered properly"):
+        st.markdown(
+            "**How is domain rating measured?** Every candidate is checked against the Ahrefs "
+            "index at the moment of your search. The figure in your results is the live score, "
+            "not an estimate from a smaller database.\n\n"
+            "**Which markets can I search?** You can search "
+            f"{len(COUNTRY_SEARCH_SETTINGS)} countries, and add a city whenever you hunt in a "
+            "single country for a tighter local list.\n\n"
+            "**Do I need my own API keys?** No. Search, authority checks and contact discovery "
+            "run on the platform accounts, which is why the services panel on the left simply "
+            "shows their status.\n\n"
+            "**Where do my leads go?** Into My Leads, under your account, and into an Excel file "
+            "whenever you choose to download one. Nothing is posted publicly and nothing is "
+            "shared with other users.\n\n"
+            "**What makes a lead good?** In our experience a DR between 10 and 30, a business "
+            "that clearly sells a local service, and both an email address and a phone number. "
+            "That combination replies at the highest rate."
+        )
 
     if not is_auth_configured():
-        st.warning("⚠️ Accounts are not configured yet (Supabase Auth). Admin: add SUPABASE_URL and SUPABASE_KEY in Streamlit Secrets.")
+        st.warning("Accounts are not configured yet. The administrator needs to add the Supabase settings before anyone can sign in.")
 
 
 user = current_user()
@@ -279,19 +439,24 @@ if not user:
     st.stop()
 
 # =============================================================
-#  LOGGED-IN APP
+#  LOGGED IN APPLICATION
 # =============================================================
 
 ensure_profile(user)
 user_is_admin = is_admin(user)
 
+if st.session_state.get("show_welcome"):
+    render_welcome(user)
+    st.stop()
+
 with st.sidebar:
-    st.markdown(f"### 👤 {user.get('email', 'My account')}")
+    st.markdown("### Account")
+    st.write(user.get("email", ""))
     if user_is_admin:
-        st.success("🛡️ Admin account")
+        st.success("Administrator account")
     else:
-        st.caption("🔒 Private dashboard — only you can see your leads.")
-    if st.button("Log out", width="stretch"):
+        st.caption("Private workspace. Only you can see your leads.")
+    if st.button("Sign out", width="stretch"):
         do_logout()
     st.divider()
     st.markdown("### Search settings")
@@ -300,7 +465,7 @@ with st.sidebar:
         min_value=0,
         max_value=100,
         value=int(LOW_DR_THRESHOLD),
-        help="Sites with a verified DR above this score are left out. 20–30 is the sweet spot for easy wins.",
+        help="Websites with a verified DR above this score are left out. A maximum between 20 and 30 gives the best balance of quality and reply rate.",
     )
     website_options = [20, 30, 50, 100]
     default_website_count = (
@@ -312,7 +477,7 @@ with st.sidebar:
         "Websites per country",
         options=website_options,
         index=website_options.index(default_website_count),
-        help="More websites = a wider hunt, but it takes a little longer.",
+        help="A larger hunt covers more ground and takes a little longer.",
     )
     st.divider()
     render_services_sidebar()
@@ -320,25 +485,26 @@ with st.sidebar:
 st.logo(LOGO_PATH)
 st.markdown(
     """
-    <div class="linkloot-hero">
-        <h1>🎯 Link Loot</h1>
-        <p>Find low-DR websites for local SEO and outreach across every niche —
-        with contacts attached and saved privately to your account.</p>
-        <span class="pill">🎯 Hunt Leads</span>
-        <span class="pill">📁 My Leads — only yours</span>
-        <span class="pill">📥 Excel export</span>
+    <div class="hero">
+        <div class="kicker">Link Loot</div>
+        <h1>Your lead workspace</h1>
+        <p class="lede">
+            Search a niche, screen it by domain rating, and receive businesses with the
+            contact details attached. Everything you find is saved privately to your account.
+        </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-tab_names = ["🎯 Hunt Leads", "📁 My Leads"]
+tab_names = ["Hunt Leads", "My Leads"]
 if user_is_admin:
-    tab_names.append("🛡️ Admin")
+    tab_names.append("Admin")
 tabs = st.tabs(tab_names)
 tab_hunt = tabs[0]
 tab_my_leads = tabs[1]
 tab_admin = tabs[2] if user_is_admin else None
+
 
 # =============================================================
 #  TAB: HUNT LEADS
@@ -346,11 +512,11 @@ tab_admin = tabs[2] if user_is_admin else None
 
 with tab_hunt:
     st.markdown("#### Start a hunt")
-    st.caption("Pick a niche, choose where to hunt, and Link Loot returns low-DR sites with contact details — saved privately to your account.")
+    st.caption("Choose a niche and a market. Link Loot returns low DR businesses with contact details, and saves them to My Leads under your account.")
     with st.form("search_form"):
         niche_col, country_col, city_col = st.columns([1, 1.35, 0.85])
         with niche_col:
-            niche = st.text_input("Niche or market", placeholder="e.g. roofing, dentist, pet supplies")
+            niche = st.text_input("Niche or market", placeholder="For example, roofing or dentistry")
         with country_col:
             countries = st.multiselect(
                 "Countries",
@@ -359,20 +525,20 @@ with tab_hunt:
                 help="Each country is saved to its own sheet in the same Excel workbook.",
             )
         with city_col:
-            city = st.text_input("City (optional)", placeholder="e.g. Austin")
-        st.caption("Search uses local-language service, booking, pricing, and best-provider phrases. Search results do not include keyword difficulty.")
-        st.caption("City is used for single-country hunts; multi-country hunts search each country broadly.")
-        submitted = st.form_submit_button("🎯 Hunt websites", type="primary", width="stretch")
+            city = st.text_input("City (optional)", placeholder="For example, Austin")
+        st.caption("Search uses local language service, booking, pricing and best provider phrases, because those are the searches buyers make.")
+        st.caption("A city applies when you hunt in a single country. With several countries, each one is searched broadly.")
+        submitted = st.form_submit_button("Start search", type="primary", width="stretch")
 
     if submitted:
         if not SERPER_API_KEY:
-            st.error("Web search is not configured. Please contact the admin.")
+            st.error("Web search is not configured. Please contact the administrator.")
         elif not AHREFS_API_KEY:
-            st.error("Domain Rating checks are not configured. Please contact the admin.")
+            st.error("Domain rating checks are not configured. Please contact the administrator.")
         elif not niche.strip() or not countries:
             st.warning("Enter a niche and select at least one country to start searching.")
         else:
-            progress = st.progress(0, text="Preparing search...")
+            progress = st.progress(0, text="Preparing search")
             status = st.status("Searching for websites", expanded=True)
             started_at = time.time()
 
@@ -398,7 +564,7 @@ with tab_hunt:
                 ]
                 all_websites = sum(len(websites) for websites in websites_by_country.values())
                 if all_websites:
-                    progress.progress(0.45, text="Checking domain ratings and contact details...")
+                    progress.progress(0.45, text="Checking domain ratings and contact details")
                     status.update(label=f"Checking {all_websites} websites across {len(countries_with_websites)} countries", state="running")
 
                     results = []
@@ -428,7 +594,6 @@ with tab_hunt:
                         st.session_state["export_name"] = "link_loot_leads.xlsx"
                         st.session_state["export_data"] = build_excel_bytes(results)
 
-                        # Save to the user's OWN lead vault
                         if is_supabase_configured():
                             saved_count, msg = save_leads_to_supabase(
                                 results,
@@ -452,12 +617,12 @@ with tab_hunt:
                     )
                     progress.empty()
                     if not results:
-                        st.info("No sites matched this DR threshold. Try a higher maximum DR.")
+                        st.info("No websites matched this DR threshold. Raising the maximum DR usually widens the field.")
                 else:
                     st.session_state["results"] = []
-                    status.update(label="Search complete: no websites found", state="complete")
+                    status.update(label="Search complete. No websites found", state="complete")
                     progress.empty()
-                    st.info("No websites found for that search. Try another niche or location.")
+                    st.info("No websites were found for that search. Try another niche name or a wider location.")
             except Exception as error:
                 status.update(label="The search could not be completed", state="error")
                 progress.empty()
@@ -482,28 +647,30 @@ with tab_hunt:
         metric_cols[3].metric("With social links", with_social)
 
         if st.session_state.get("supabase_sync_msg"):
-            st.success(f"🗄️ {st.session_state['supabase_sync_msg']} — find them any time in **My Leads**.")
+            st.success(st.session_state["supabase_sync_msg"])
 
         st.caption(
-            "DR 0 through the selected maximum is included. Ahrefs DR is required for DR filtering; "
-            "OpenPageRank is not treated as Domain Rating."
+            "Scores from zero through your selected maximum are included, and every score shown "
+            "is the Ahrefs domain rating verified during this search."
         )
-        if not HUNTER_API_KEY:
-            st.info(
-                "Email verification (Hunter.io) is not switched on by the admin yet. "
-                "Emails shown are collected from the sites themselves — a quick manual check before a big campaign is a good idea."
-            )
+        st.caption(
+            "Email addresses are collected from public business pages. Personal, relevant "
+            "outreach consistently outperforms bulk messaging, so use the niche and city on "
+            "each lead when you write."
+        )
 
         st.markdown("#### Website results")
         if st.session_state.get("export_data"):
             st.download_button(
-                "📥 Download Excel",
+                "Download Excel",
                 data=st.session_state["export_data"],
                 file_name=st.session_state["export_name"],
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
-        results_frame = pd.DataFrame(results).rename(columns=LEAD_DISPLAY_COLUMNS)
+        results_frame_full = pd.DataFrame(results)
+        display_columns = [c for c in RESULT_COLUMN_ORDER if c in results_frame_full.columns]
+        results_frame = results_frame_full[display_columns].rename(columns=LEAD_DISPLAY_COLUMNS)
         st.dataframe(
             results_frame,
             width="stretch",
@@ -514,36 +681,37 @@ with tab_hunt:
         st.markdown("#### Lead overview")
         st.caption("No lead results to display yet.")
     else:
-        st.info("👆 Run your first hunt above — try **dentist + USA + Austin** or **roofing + UK** to see it in action.")
+        st.info("Run your first hunt above. A focused starting point is one trade, one country and one city, for example dentistry in Austin, USA.")
+
 
 # =============================================================
-#  TAB: MY LEADS (private — only the signed-in user's leads)
+#  TAB: MY LEADS. PRIVATE TO THE SIGNED IN USER
 # =============================================================
 
 with tab_my_leads:
-    st.markdown("### 📁 My Leads")
-    st.caption("Only your leads live here. They are saved to your account every time you hunt — no other user can see, download or delete them.")
+    st.markdown("### My Leads")
+    st.caption("Every lead you have collected, saved under your account. Only you can see this list, download it or remove entries from it.")
 
     if not is_supabase_configured():
-        st.warning("⚠️ Lead storage is not connected yet. Please contact the admin.")
+        st.warning("Lead storage is not connected yet. Please contact the administrator.")
     else:
         filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([1, 1, 1, 1.2])
         with filter_col1:
             selected_country = st.selectbox(
-                "Filter Country",
+                "Filter by country",
                 options=["All"] + list(COUNTRY_SEARCH_SETTINGS.keys()),
                 index=0,
                 key="db_country_filter",
             )
         with filter_col2:
-            niche_filter = st.text_input("Filter Niche", placeholder="e.g. roofing", key="db_niche_filter")
+            niche_filter = st.text_input("Filter by niche", placeholder="For example, roofing", key="db_niche_filter")
         with filter_col3:
-            max_dr_filter = st.slider("Max DR", 0, 100, 100, key="db_dr_filter")
+            max_dr_filter = st.slider("Maximum DR", 0, 100, 100, key="db_dr_filter")
         with filter_col4:
             email_only = st.checkbox("Only leads with email", value=False, key="db_email_filter")
-            search_query = st.text_input("Search (domain / title / email)", placeholder="e.g. acme", key="db_search_filter")
+            search_query = st.text_input("Search domain, title or email", placeholder="Search text", key="db_search_filter")
 
-        if st.button("🔄 Refresh my leads", type="secondary"):
+        if st.button("Refresh", type="secondary"):
             st.rerun()
 
         leads_data, status_msg = fetch_leads_from_supabase(
@@ -556,8 +724,6 @@ with tab_my_leads:
             user_id=user.get("id"),
             access_token=user.get("access_token"),
         )
-        # Safety net: even if the database returned extra rows, only ever
-        # display rows that belong to this account.
         my_email = (user.get("email") or "").lower()
         leads_data = [
             row for row in leads_data
@@ -568,7 +734,7 @@ with tab_my_leads:
         stat_col1, stat_col2, stat_col3 = st.columns(3)
         stat_col1.metric("My leads", len(leads_data))
         stat_col2.metric("With email", sum(1 for r in leads_data if r.get("emails")))
-        stat_col3.metric("Low DR (≤ 30)", sum(1 for r in leads_data if r.get("dr_score") is not None and r["dr_score"] <= 30))
+        stat_col3.metric("Low DR, 30 or below", sum(1 for r in leads_data if r.get("dr_score") is not None and r["dr_score"] <= 30))
 
         if leads_data:
             df_db = pd.DataFrame(leads_data)
@@ -583,7 +749,7 @@ with tab_my_leads:
             with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
                 df_display.to_excel(writer, index=False, sheet_name="My Leads")
             st.download_button(
-                "📥 Download my leads (Excel)",
+                "Download my leads as Excel",
                 data=excel_buffer.getvalue(),
                 file_name="my_link_loot_leads.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -596,14 +762,14 @@ with tab_my_leads:
                 column_config={"Website": st.column_config.LinkColumn("Website", display_text="Open site")},
             )
 
-            with st.expander("🗑️ Delete one of my leads"):
+            with st.expander("Remove one of my leads"):
                 delete_options = {
                     f"{row.get('domain') or row.get('url')} (DR {row.get('dr_score')})": row.get("id")
                     for row in leads_data if row.get("id") is not None
                 }
                 if delete_options:
-                    chosen_label = st.selectbox("Choose a lead to delete", options=list(delete_options), key="my_delete_select")
-                    if st.button("Delete this lead", key="my_delete_button"):
+                    chosen_label = st.selectbox("Choose a lead to remove", options=list(delete_options), key="my_delete_select")
+                    if st.button("Remove this lead", key="my_delete_button"):
                         ok, message = delete_lead_by_id(delete_options[chosen_label], user_id=user.get("id"))
                         if ok:
                             st.success(message)
@@ -611,28 +777,26 @@ with tab_my_leads:
                         else:
                             st.error(message)
         else:
-            st.info("No leads here yet. Run a hunt in **🎯 Hunt Leads** and your leads will appear here automatically.")
+            st.info("Nothing here yet. Run a hunt in Hunt Leads and your results will be saved here automatically.")
 
 
 # =============================================================
-#  TAB: ADMIN (only for ADMIN_EMAILS accounts)
-#  Database browser, Setup & SQL and platform controls live
-#  here — regular users never see them.
+#  TAB: ADMIN. VISIBLE ONLY TO ADMIN ACCOUNTS
 # =============================================================
 
 if tab_admin is not None:
     with tab_admin:
-        st.markdown("### 🛡️ Admin Dashboard")
-        st.caption("Platform-wide control: every user, every lead, system health and setup. Regular users never see this tab.")
+        st.markdown("### Admin dashboard")
+        st.caption("Platform wide control for the owner. Registered users, every lead, service health and the one time setup all live here, and regular users never see this tab.")
 
         overview = get_admin_overview()
         admin_metric_cols = st.columns(4)
         admin_metric_cols[0].metric("Registered users", overview["total_users"])
-        admin_metric_cols[1].metric("Total leads (all users)", overview["total_leads"])
+        admin_metric_cols[1].metric("Total leads, all users", overview["total_leads"])
         admin_metric_cols[2].metric("Leads with email", overview["with_email"])
-        admin_metric_cols[3].metric("Low DR (≤ 30)", overview["low_dr"])
+        admin_metric_cols[3].metric("Low DR, 30 or below", overview["low_dr"])
 
-        st.markdown("#### Users & their leads")
+        st.markdown("#### Users and their leads")
         if overview["per_user"]:
             st.dataframe(
                 pd.DataFrame(overview["per_user"]).rename(columns={
@@ -641,17 +805,19 @@ if tab_admin is not None:
                 width="stretch", hide_index=True,
             )
         else:
-            st.info("No leads saved yet.")
+            st.info("No leads have been saved yet.")
         if overview["profiles"]:
             with st.expander(f"Registered accounts ({len(overview['profiles'])})"):
+                profiles_frame = pd.DataFrame(overview["profiles"])
+                profile_cols = [c for c in ["email", "full_name", "created_at"] if c in profiles_frame.columns]
                 st.dataframe(
-                    pd.DataFrame(overview["profiles"]).rename(columns={
+                    profiles_frame[profile_cols].rename(columns={
                         "email": "Email", "full_name": "Name", "created_at": "Signed up (UTC)",
                     }),
                     width="stretch", hide_index=True,
                 )
         else:
-            st.caption("No rows in public.profiles yet — run supabase_schema_v2.sql and profiles will fill in as users log in.")
+            st.caption("No profiles yet. Profiles fill in automatically as users sign in, once the version 2 SQL has been run.")
 
         niche_col, country_col = st.columns(2)
         with niche_col:
@@ -668,8 +834,8 @@ if tab_admin is not None:
                 ), width="stretch", hide_index=True)
 
         st.divider()
-        st.markdown("#### All leads (every user)")
-        admin_search = st.text_input("Search all leads (domain / title / email)", key="admin_search")
+        st.markdown("#### All leads, every user")
+        admin_search = st.text_input("Search all leads by domain, title or email", key="admin_search")
         all_leads, _ = fetch_leads_from_supabase(
             limit=1000,
             search_query=admin_search if admin_search.strip() else None,
@@ -682,7 +848,7 @@ if tab_admin is not None:
             with pd.ExcelWriter(admin_buffer, engine="openpyxl") as writer:
                 admin_display.to_excel(writer, index=False, sheet_name="All Leads")
             st.download_button(
-                "📥 Download all leads (Excel)",
+                "Download all leads as Excel",
                 data=admin_buffer.getvalue(),
                 file_name="all_link_loot_leads.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -691,14 +857,14 @@ if tab_admin is not None:
                 admin_display, width="stretch", hide_index=True,
                 column_config={"Website": st.column_config.LinkColumn("Website", display_text="Open site")},
             )
-            with st.expander("🗑️ Delete a lead (any user)"):
+            with st.expander("Remove a lead belonging to any user"):
                 admin_delete_options = {
-                    f"{row.get('user_email') or '—'} · {row.get('domain') or row.get('url')}": row.get("id")
+                    f"{row.get('user_email') or 'Unassigned'} · {row.get('domain') or row.get('url')}": row.get("id")
                     for row in all_leads if row.get("id") is not None
                 }
                 if admin_delete_options:
                     admin_chosen = st.selectbox("Choose a lead", options=list(admin_delete_options), key="admin_delete_select")
-                    if st.button("Delete lead", key="admin_delete_button"):
+                    if st.button("Remove lead", key="admin_delete_button"):
                         ok, message = delete_lead_by_id(admin_delete_options[admin_chosen])
                         if ok:
                             st.success(message)
@@ -709,34 +875,34 @@ if tab_admin is not None:
             st.info("No leads found.")
 
         st.divider()
-        st.markdown("#### System & setup")
+        st.markdown("#### System and setup")
         sys_col1, sys_col2 = st.columns(2)
         with sys_col1:
-            st.markdown("**Service keys (values never shown)**")
-            st.caption(f"Serper (web search): {'set ✅' if SERPER_API_KEY else 'missing ⚠️'}")
-            st.caption(f"Ahrefs (DR): {'set ✅' if AHREFS_API_KEY else 'missing ⚠️'}")
-            st.caption(f"Hunter (email verify): {'set ✅' if HUNTER_API_KEY else 'not set'}")
-            st.caption(f"Supabase: {'configured ✅' if is_supabase_configured() else 'missing ⚠️'}")
-            if st.button("🔌 Test Supabase connection", type="primary"):
+            st.markdown("**Service configuration. Values are never displayed.**")
+            st.caption(f"Serper, web search: {'Set' if SERPER_API_KEY else 'Missing'}")
+            st.caption(f"Ahrefs, domain rating: {'Set' if AHREFS_API_KEY else 'Missing'}")
+            st.caption(f"Hunter, email checking: {'Set' if HUNTER_API_KEY else 'Not set'}")
+            st.caption(f"Supabase: {'Configured' if is_supabase_configured() else 'Missing'}")
+            if st.button("Test the Supabase connection", type="primary"):
                 success, message = test_connection()
                 if success:
-                    st.success(f"✅ {message}")
+                    st.success(message)
                 else:
-                    st.error(f"❌ {message}")
+                    st.error(message)
         with sys_col2:
-            st.markdown("**One-time setup checklist**")
+            st.markdown("**One time setup checklist**")
             st.markdown(
-                "1. Run **supabase_schema.sql** (v1) in Supabase SQL Editor — creates the leads table.\n"
-                "2. Run **supabase_schema_v2.sql** — adds per-user leads + profiles (accounts update).\n"
-                "3. In Supabase → Authentication → Providers → Email: keep **Email** enabled so users can sign up.\n"
-                "4. In Streamlit Secrets set **ADMIN_EMAILS** to your email to unlock this Admin tab.\n"
-                "5. Make sure **SUPABASE_URL / SUPABASE_KEY** and the API keys are in Streamlit Secrets."
+                "Step 1. Run supabase_schema.sql in the Supabase SQL Editor to create the leads table.\n\n"
+                "Step 2. Run supabase_schema_v2.sql to add per user leads and the profiles table.\n\n"
+                "Step 3. In Supabase, open Authentication and then URL Configuration. Set the Site URL to the live address of this app, and add the same address under Redirect URLs. Confirmation emails send users there.\n\n"
+                "Step 4. In Supabase, open Authentication and then Providers, and keep Email sign in enabled.\n\n"
+                "Step 5. In Streamlit Secrets, set ADMIN_EMAILS to your own email address to unlock this tab, and confirm that the Supabase and API settings are present."
             )
 
         for schema_name in ("supabase_schema_v2.sql", "supabase_schema.sql"):
             schema_file = Path(__file__).with_name(schema_name)
             if schema_file.exists():
-                with st.expander(f"📄 {schema_name}"):
+                with st.expander(schema_name):
                     sql_content = schema_file.read_text(encoding="utf-8")
                     st.code(sql_content, language="sql")
                     st.download_button(

@@ -12,7 +12,9 @@ leads are saved with their user_id and only they can see them.
 from typing import Any, Dict, Optional, Tuple
 import requests
 
-from app_config import ADMIN_EMAILS, SUPABASE_KEY, SUPABASE_URL
+from urllib.parse import quote
+
+from app_config import ADMIN_EMAILS, APP_URL, SUPABASE_KEY, SUPABASE_URL
 
 
 def _clean_base_url() -> str:
@@ -69,8 +71,11 @@ def sign_up(email: str, password: str, full_name: str = "") -> Tuple[bool, str, 
         payload["data"] = {"full_name": full_name.strip()}
 
     try:
+        # Send verified users back to the live app, never to a local address.
+        # The app URL must also be allowed in Supabase under
+        # Authentication, URL Configuration.
         response = requests.post(
-            f"{_clean_base_url()}/auth/v1/signup",
+            f"{_clean_base_url()}/auth/v1/signup?redirect_to={quote(APP_URL, safe='')}",
             headers=_auth_headers(),
             json=payload,
             timeout=15,
@@ -121,6 +126,24 @@ def sign_in(email: str, password: str) -> Tuple[bool, str, Optional[Dict[str, An
             "refresh_token": data.get("refresh_token"),
         }
     return False, _error_message(response), None
+
+
+def resend_confirmation(email: str) -> Tuple[bool, str]:
+    """Resend the signup confirmation email (for expired or lost links)."""
+    if not is_auth_configured():
+        return False, "Accounts are not configured yet. Please contact the admin."
+    try:
+        response = requests.post(
+            f"{_clean_base_url()}/auth/v1/resend?redirect_to={quote(APP_URL, safe='')}",
+            headers=_auth_headers(),
+            json={"type": "signup", "email": email.strip()},
+            timeout=15,
+        )
+    except Exception as error:
+        return False, f"Connection error: {error}"
+    if response.status_code in (200, 201):
+        return True, "A new confirmation email is on its way. Please use the newest link."
+    return False, _error_message(response)
 
 
 def is_admin(user: Optional[Dict[str, Any]]) -> bool:
