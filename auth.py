@@ -192,14 +192,31 @@ def is_admin(user: Optional[Dict[str, Any]]) -> bool:
     return bool(email and email in ADMIN_EMAILS)
 
 
-def ensure_profile(user: Dict[str, Any]) -> None:
+def ensure_profile(user: Dict[str, Any]) -> bool:
     """
     Create/update the user's row in public.profiles (best effort).
     Used by the Admin dashboard to list registered users.
-    Silently ignores errors (e.g. v2 SQL not run yet).
+    Returns True only when this call created the profile, which means this
+    is the user's first sign in ever. Silently ignores errors (e.g. v2 SQL
+    not run yet) and returns False when it cannot tell.
     """
     if not is_auth_configured() or not user or not user.get("id"):
-        return
+        return False
+    existed = True
+    try:
+        check = requests.get(
+            f"{_clean_base_url()}/rest/v1/profiles",
+            params={"id": f"eq.{user['id']}", "select": "id"},
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+            },
+            timeout=10,
+        )
+        if check.status_code == 200:
+            existed = len(check.json()) > 0
+    except Exception:
+        existed = True
     try:
         requests.post(
             f"{_clean_base_url()}/rest/v1/profiles",
@@ -217,3 +234,4 @@ def ensure_profile(user: Dict[str, Any]) -> None:
         )
     except Exception:
         pass
+    return not existed

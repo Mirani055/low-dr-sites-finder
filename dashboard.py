@@ -218,9 +218,6 @@ def render_services_sidebar():
 # =============================================================
 
 def render_welcome(user):
-    _wl, _wm, _wr = st.columns([1, 1.4, 1])
-    with _wm:
-        st.image(LOGO_PATH, width=280)
     st.markdown(
         f"""
         <div class="welcome">
@@ -329,8 +326,9 @@ def render_auth_page():
                         ok, message, user = sign_in(login_email, login_password)
                         if ok and user:
                             st.session_state["auth_user"] = user
-                            st.session_state["show_welcome"] = True
-                            ensure_profile(user)
+                            # The Congratulations page is only for a first
+                            # sign in. Returning users go straight to the tool.
+                            st.session_state["show_welcome"] = ensure_profile(user)
                             st.rerun()
                         else:
                             st.error("We could not sign you in. Check your email address and password, and make sure your email address has been confirmed.")
@@ -479,8 +477,10 @@ if not current_user():
         st.query_params.clear()
         if _token_user:
             st.session_state["auth_user"] = _token_user
-            st.session_state["show_welcome"] = True
-            ensure_profile(_token_user)
+            # Google sign in is also the sign up. ensure_profile returns
+            # True only for a first ever sign in, so the Congratulations
+            # page shows once per account and never again.
+            st.session_state["show_welcome"] = ensure_profile(_token_user)
         else:
             st.session_state["auth_error_msg"] = "Google sign in did not complete. Please try again, or sign in with your email address and password."
         st.rerun()
