@@ -295,6 +295,88 @@ def render_auth_page():
         unsafe_allow_html=True,
     )
 
+    # Sign in and sign up, in one clean card directly under the hero.
+    _, card_col, _ = st.columns([1, 1.7, 1])
+    with card_col:
+        with st.container(border=True):
+            logo_left, logo_mid, logo_right = st.columns([1, 0.5, 1])
+            with logo_mid:
+                st.image(LOGO_PATH, width=64)
+            st.markdown(
+                "<h3 style='text-align: center; margin-bottom: 0;'>Welcome to Link Loot</h3>"
+                "<p style='text-align: center; color: #6B6472; margin-top: 4px;'>"
+                "Sign in to your workspace, or create a free account.</p>",
+                unsafe_allow_html=True,
+            )
+            tab_login, tab_signup = st.tabs(["Sign in", "Create account"])
+            with tab_login:
+                with st.form("login_form"):
+                    login_email = st.text_input("Email", placeholder="you@example.com")
+                    login_password = st.text_input("Password", type="password")
+                    login_submitted = st.form_submit_button("Continue", type="primary", width="stretch")
+                if login_submitted:
+                    if not login_email.strip() or not login_password:
+                        st.warning("Enter your email address and your password.")
+                    else:
+                        ok, message, user = sign_in(login_email, login_password)
+                        if ok and user:
+                            st.session_state["auth_user"] = user
+                            st.session_state["show_welcome"] = True
+                            ensure_profile(user)
+                            st.rerun()
+                        else:
+                            st.error("We could not sign you in. Check your email address and password, and make sure your email address has been confirmed.")
+                st.caption("Confirmed your email address a moment ago? Sign in above and your dashboard will open.")
+                with st.expander("The confirmation link has expired"):
+                    st.markdown(
+                        "Confirmation links work once and only for a limited time. Enter your "
+                        "email address and we will send a fresh one. Always use the newest "
+                        "link in your inbox."
+                    )
+                    with st.form("resend_form"):
+                        resend_email = st.text_input("Email", placeholder="you@example.com", key="resend_email")
+                        resend_submitted = st.form_submit_button("Send a new confirmation link", width="stretch")
+                    if resend_submitted:
+                        if not resend_email.strip():
+                            st.warning("Enter the email address you signed up with.")
+                        else:
+                            ok, message = resend_confirmation(resend_email)
+                            if ok:
+                                st.success(message)
+                            else:
+                                st.error(message)
+            with tab_signup:
+                with st.form("signup_form"):
+                    signup_name = st.text_input("Your name", placeholder="Full name")
+                    signup_email = st.text_input("Email", placeholder="you@example.com", key="signup_email")
+                    signup_password = st.text_input("Create a password", type="password", key="signup_password",
+                                                     help="Use at least 6 characters.")
+                    signup_submitted = st.form_submit_button("Create my account", type="primary", width="stretch")
+                if signup_submitted:
+                    if not signup_email.strip() or not signup_password:
+                        st.warning("Enter an email address and a password to create your account.")
+                    elif len(signup_password) < 6:
+                        st.warning("Your password needs at least 6 characters.")
+                    else:
+                        ok, message, user = sign_up(signup_email, signup_password, signup_name)
+                        if ok and user:
+                            st.session_state["auth_user"] = user
+                            st.session_state["show_welcome"] = True
+                            ensure_profile(user)
+                            st.rerun()
+                        elif ok:
+                            st.success("Your account has been created. We have emailed you a confirmation link. Select it once, then sign in here and your dashboard will open.")
+                        else:
+                            st.error(message)
+                st.caption("Creating an account opens your private workspace. Your leads are never shared with other users.")
+            st.markdown(
+                "<p style='text-align: center; color: #6B6472; font-size: 0.85rem; margin-bottom: 0;'>"
+                "Protected by Supabase authentication. No captcha, no card, no commitment.</p>",
+                unsafe_allow_html=True,
+            )
+
+    st.divider()
+
     st.markdown("### A lead is more than a web address")
     col_a, col_b, col_c = st.columns(3)
     with col_a:
@@ -330,70 +412,8 @@ def render_auth_page():
 
     st.divider()
 
-    auth_col, side_col = st.columns([1.05, 1])
-    with auth_col:
-        tab_login, tab_signup = st.tabs(["Sign in", "Create account"])
-        with tab_login:
-            with st.form("login_form"):
-                login_email = st.text_input("Email", placeholder="you@example.com")
-                login_password = st.text_input("Password", type="password")
-                login_submitted = st.form_submit_button("Sign in", type="primary", width="stretch")
-            if login_submitted:
-                if not login_email.strip() or not login_password:
-                    st.warning("Enter your email address and your password.")
-                else:
-                    ok, message, user = sign_in(login_email, login_password)
-                    if ok and user:
-                        st.session_state["auth_user"] = user
-                        st.session_state["show_welcome"] = True
-                        ensure_profile(user)
-                        st.rerun()
-                    else:
-                        st.error("We could not sign you in. Check your email address and password, and make sure your email address has been confirmed.")
-            st.caption("Confirmed your email address a moment ago? Sign in above and your dashboard will open.")
-            with st.expander("The confirmation link has expired"):
-                st.markdown(
-                    "Confirmation links work once and only for a limited time. Enter your "
-                    "email address and we will send a fresh one. Always use the newest "
-                    "link in your inbox."
-                )
-                with st.form("resend_form"):
-                    resend_email = st.text_input("Email", placeholder="you@example.com", key="resend_email")
-                    resend_submitted = st.form_submit_button("Send a new confirmation link", width="stretch")
-                if resend_submitted:
-                    if not resend_email.strip():
-                        st.warning("Enter the email address you signed up with.")
-                    else:
-                        ok, message = resend_confirmation(resend_email)
-                        if ok:
-                            st.success(message)
-                        else:
-                            st.error(message)
-        with tab_signup:
-            with st.form("signup_form"):
-                signup_name = st.text_input("Your name", placeholder="Full name")
-                signup_email = st.text_input("Email", placeholder="you@example.com", key="signup_email")
-                signup_password = st.text_input("Create a password", type="password", key="signup_password",
-                                                 help="Use at least 6 characters.")
-                signup_submitted = st.form_submit_button("Create my account", type="primary", width="stretch")
-            if signup_submitted:
-                if not signup_email.strip() or not signup_password:
-                    st.warning("Enter an email address and a password to create your account.")
-                elif len(signup_password) < 6:
-                    st.warning("Your password needs at least 6 characters.")
-                else:
-                    ok, message, user = sign_up(signup_email, signup_password, signup_name)
-                    if ok and user:
-                        st.session_state["auth_user"] = user
-                        st.session_state["show_welcome"] = True
-                        ensure_profile(user)
-                        st.rerun()
-                    elif ok:
-                        st.success("Your account has been created. We have emailed you a confirmation link. Select it once, then sign in here and your dashboard will open.")
-                    else:
-                        st.error(message)
-            st.caption("Creating an account opens your private workspace. Your leads are never shared with other users.")
-    with side_col:
+    who_col, data_col = st.columns(2)
+    with who_col:
         st.markdown("#### Who uses Link Loot")
         st.markdown(
             "**Freelance SEO consultants** who need a steady flow of realistic first clients "
@@ -402,12 +422,12 @@ def render_auth_page():
             "**Outreach and link building teams** who need low authority sites with a named "
             "business and a working route to the owner."
         )
+    with data_col:
         st.markdown("#### Your data stays yours")
         st.markdown(
             "Accounts are separated at the data level. Your searches are saved against your "
-            "account only, your exports are generated inside your own session, and the "
-            "platform team can see totals for support purposes without your leads ever "
-            "appearing in another customer dashboard."
+            "account only, your exports are generated inside your own session, and your "
+            "leads never appear in another customer dashboard."
         )
 
     with st.expander("Questions, answered properly"):
