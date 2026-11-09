@@ -14,7 +14,7 @@ import requests
 
 from urllib.parse import quote
 
-from app_config import ADMIN_EMAILS, APP_URL, SUPABASE_KEY, SUPABASE_URL
+from app_config import ADMIN_EMAILS, APP_URL, AUTH_BRIDGE_URL, SUPABASE_KEY, SUPABASE_URL
 
 
 def _clean_base_url() -> str:
@@ -144,6 +144,44 @@ def resend_confirmation(email: str) -> Tuple[bool, str]:
     if response.status_code in (200, 201):
         return True, "A new confirmation email is on its way. Please use the newest link."
     return False, _error_message(response)
+
+
+def google_sign_in_url() -> str:
+    """Supabase OAuth entry point for Google sign in.
+
+    Google sends the user back to the static bridge page, which forwards
+    them into the app. The Google provider must be enabled in Supabase
+    (Authentication, Providers, Google) for this to work.
+    """
+    return (
+        f"{_clean_base_url()}/auth/v1/authorize?provider=google"
+        f"&redirect_to={quote(AUTH_BRIDGE_URL, safe='')}"
+    )
+
+
+def get_user_from_token(access_token: str, refresh_token: str = "") -> Optional[Dict[str, Any]]:
+    """Validate an access token with Supabase and return the session user."""
+    if not is_auth_configured() or not access_token:
+        return None
+    try:
+        response = requests.get(
+            f"{_clean_base_url()}/auth/v1/user",
+            headers=_auth_headers(access_token),
+            timeout=15,
+        )
+    except Exception:
+        return None
+    if response.status_code != 200:
+        return None
+    data = response.json()
+    if not data.get("id"):
+        return None
+    return {
+        "id": data.get("id"),
+        "email": data.get("email"),
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
 
 
 def is_admin(user: Optional[Dict[str, Any]]) -> bool:

@@ -23,6 +23,8 @@ from app_config import (
 )
 from auth import (
     ensure_profile,
+    get_user_from_token,
+    google_sign_in_url,
     is_admin,
     is_auth_configured,
     resend_confirmation,
@@ -113,7 +115,7 @@ STYLE_CSS = """
 """
 st.markdown(STYLE_CSS, unsafe_allow_html=True)
 
-LOGO_PATH = str(Path(__file__).with_name("link_loot.svg"))
+LOGO_PATH = str(Path(__file__).with_name("link_loot_logo.png"))
 
 
 def current_user():
@@ -216,6 +218,9 @@ def render_services_sidebar():
 # =============================================================
 
 def render_welcome(user):
+    _wl, _wm, _wr = st.columns([1, 1.4, 1])
+    with _wm:
+        st.image(LOGO_PATH, width=280)
     st.markdown(
         f"""
         <div class="welcome">
@@ -260,7 +265,7 @@ def render_welcome(user):
 
 def render_auth_page():
     with st.sidebar:
-        st.image(LOGO_PATH, width=64)
+        st.image(LOGO_PATH, width=200)
         st.markdown("### Your account, your leads")
         st.markdown(
             "Link Loot is built for professionals who sell SEO services. "
@@ -295,13 +300,16 @@ def render_auth_page():
         unsafe_allow_html=True,
     )
 
+    if st.session_state.get("auth_error_msg"):
+        st.error(st.session_state.pop("auth_error_msg"))
+
     # Sign in and sign up, in one clean card directly under the hero.
     _, card_col, _ = st.columns([1, 1.7, 1])
     with card_col:
         with st.container(border=True):
-            logo_left, logo_mid, logo_right = st.columns([1, 0.5, 1])
+            logo_left, logo_mid, logo_right = st.columns([0.6, 2, 0.6])
             with logo_mid:
-                st.image(LOGO_PATH, width=64)
+                st.image(LOGO_PATH, width=300)
             st.markdown(
                 "<h3 style='text-align: center; margin-bottom: 0;'>Welcome to Link Loot</h3>"
                 "<p style='text-align: center; color: #6B6472; margin-top: 4px;'>"
@@ -369,6 +377,14 @@ def render_auth_page():
                         else:
                             st.error(message)
                 st.caption("Creating an account opens your private workspace. Your leads are never shared with other users.")
+            st.markdown(
+                "<div style='display: flex; align-items: center; gap: 12px; margin: 14px 0 10px 0;'>"
+                "<hr style='flex: 1; border: none; border-top: 1px solid #E3DCF0;'>"
+                "<span style='color: #6B6472; font-size: 0.85rem;'>or</span>"
+                "<hr style='flex: 1; border: none; border-top: 1px solid #E3DCF0;'></div>",
+                unsafe_allow_html=True,
+            )
+            st.link_button("Continue with Google", google_sign_in_url(), width="stretch")
             st.markdown(
                 "<p style='text-align: center; color: #6B6472; font-size: 0.85rem; margin-bottom: 0;'>"
                 "Protected by Supabase authentication. No captcha, no card, no commitment.</p>",
@@ -452,6 +468,26 @@ def render_auth_page():
     if not is_auth_configured():
         st.warning("Accounts are not configured yet. The administrator needs to add the Supabase settings before anyone can sign in.")
 
+
+# Google sign in returns through the bridge page with a token in the
+# address. Validate it once, open the session, then clean the address so
+# the token is not kept in the browser history or a bookmark.
+if not current_user():
+    _qp = st.query_params
+    if "access_token" in _qp:
+        _token_user = get_user_from_token(_qp.get("access_token", ""), _qp.get("refresh_token", ""))
+        st.query_params.clear()
+        if _token_user:
+            st.session_state["auth_user"] = _token_user
+            st.session_state["show_welcome"] = True
+            ensure_profile(_token_user)
+        else:
+            st.session_state["auth_error_msg"] = "Google sign in did not complete. Please try again, or sign in with your email address and password."
+        st.rerun()
+    elif "auth_error" in _qp:
+        st.session_state["auth_error_msg"] = _qp.get("auth_error", "Sign in did not complete.")
+        st.query_params.clear()
+        st.rerun()
 
 user = current_user()
 if not user:

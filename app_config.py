@@ -72,6 +72,15 @@ APP_URL = _get_secret(
     "https://low-dr-sites-finder-ydeycbdx2kjzsa6wqqxpsl.streamlit.app/",
 )
 
+# Static bridge page (GitHub Pages, docs/auth-callback.html in this repo).
+# Google sign in returns its tokens to this page, which forwards the user
+# back into the app. The bridge address must be listed under Redirect URLs
+# in Supabase Authentication, URL Configuration.
+AUTH_BRIDGE_URL = _get_secret(
+    "AUTH_BRIDGE_URL",
+    "https://mirani055.github.io/low-dr-sites-finder/auth-callback.html",
+)
+
 # ==========================================
 # Admin Access
 # ==========================================
