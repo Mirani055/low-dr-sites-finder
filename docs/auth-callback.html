@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Link Loot. Signing you in</title>
+<style>
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(130deg, #2E1065 0%, #5B2A9D 55%, #9A3412 140%);
+    color: #FFFFFF;
+  }
+  .card { text-align: center; padding: 40px 32px; max-width: 420px; }
+  h1 { font-size: 1.6rem; margin: 0 0 10px 0; }
+  p { color: #EFEAF9; line-height: 1.6; margin: 0; }
+  .spinner {
+    width: 44px; height: 44px; margin: 0 auto 22px auto; border-radius: 50%;
+    border: 4px solid rgba(255,255,255,0.3); border-top-color: #FFFFFF;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <h1>Link Loot</h1>
+    <p id="msg">Completing your sign in. One moment.</p>
+  </div>
+<script>
+(function () {
+  var APP = "https://low-dr-sites-finder-ydeycbdx2kjzsa6wqqxpsl.streamlit.app/";
+  var hash = window.location.hash ? window.location.hash.substring(1) : "";
+  var fromHash = new URLSearchParams(hash);
+  var fromQuery = new URLSearchParams(window.location.search);
+
+  var token = fromHash.get("access_token") || fromQuery.get("access_token");
+  var refresh = fromHash.get("refresh_token") || fromQuery.get("refresh_token") || "";
+  var error = fromHash.get("error_description") || fromQuery.get("error_description")
+           || fromHash.get("error") || fromQuery.get("error");
+
+  if (token) {
+    window.location.replace(
+      APP + "?access_token=" + encodeURIComponent(token)
+          + "&refresh_token=" + encodeURIComponent(refresh)
+    );
+  } else if (error) {
+    window.location.replace(APP + "?auth_error=" + encodeURIComponent(error));
+  } else {
+    document.getElementById("msg").textContent =
+      "This page completes a Google sign in for Link Loot. Please return to the app and choose Continue with Google again.";
+  }
+})();
+</script>
+</body>
+</html>
