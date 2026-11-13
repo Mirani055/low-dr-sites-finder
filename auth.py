@@ -184,6 +184,38 @@ def get_user_from_token(access_token: str, refresh_token: str = "") -> Optional[
     }
 
 
+def refresh_session(refresh_token: str) -> Optional[Dict[str, Any]]:
+    """
+    Exchange a refresh token for a fresh session.
+    Access tokens expire after about an hour; without a refresh, a user who
+    keeps the app open finds that saving and loading leads quietly fails.
+    Returns the new session user dict, or None when the refresh fails.
+    """
+    if not is_auth_configured() or not refresh_token:
+        return None
+    try:
+        response = requests.post(
+            f"{_clean_base_url()}/auth/v1/token?grant_type=refresh_token",
+            headers=_auth_headers(),
+            json={"refresh_token": refresh_token},
+            timeout=15,
+        )
+    except Exception:
+        return None
+    if response.status_code != 200:
+        return None
+    data = response.json()
+    user = data.get("user") or {}
+    if not data.get("access_token"):
+        return None
+    return {
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "access_token": data.get("access_token"),
+        "refresh_token": data.get("refresh_token") or refresh_token,
+    }
+
+
 def is_admin(user: Optional[Dict[str, Any]]) -> bool:
     """Admin = signed-in email listed in ADMIN_EMAILS (Streamlit Secrets)."""
     if not user:

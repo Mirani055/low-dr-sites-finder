@@ -8,6 +8,7 @@ Requires no heavy dependencies (uses requests).
 """
 
 from datetime import datetime
+import math
 from typing import Any, Dict, List, Optional, Tuple
 import requests
 
@@ -79,6 +80,8 @@ def _format_lead_for_db(
     if dr_score is not None:
         try:
             dr_score = float(dr_score)
+            if not math.isfinite(dr_score):
+                dr_score = None
         except (ValueError, TypeError):
             dr_score = None
 
@@ -141,44 +144,74 @@ def save_leads_to_supabase(
     if not cleaned_rows:
         return 0, "No valid lead rows to save."
 
-    url = f"{_clean_base_url()}/rest/v1/leads"
-    headers = _get_headers(access_token)
-    headers["Prefer"] = "resolution=merge-duplicates,return=representation"
+    # One row per URL inside a single request: PostgREST rejects a batch
+    # that repeats the same conflict key, so drop in-batch duplicates.
+    seen_keys = set()
+    unique_rows = []
+    for row in cleaned_rows:
+        key = row.get("url") or row.get("domain")
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        unique_rows.append(row)
+    cleaned_rows = unique_rows
 
-    try:
-        response = requests.post(url, headers=headers, json=cleaned_rows, timeout=20)
+    base_url = f"{_clean_base_url()}/rest/v1/leads"
+    legacy_rows = [
+        {k: v for k, v in row.items() if k not in ("user_id", "user_email")}
+        for row in cleaned_rows
+    ]
+    has_ownership = any("user_id" in row for row in cleaned_rows)
 
-        # v2 columns (user_id / user_email) not added yet -> retry without them
-        # so saving keeps working until the admin runs supabase_schema_v2.sql.
-        if response.status_code == 400 and user_id:
-            legacy_rows = [
-                {k: v for k, v in row.items() if k not in ("user_id", "user_email")}
-                for row in cleaned_rows
-            ]
-            response = requests.post(url, headers=headers, json=legacy_rows, timeout=20)
-            if response.status_code in (200, 201):
-                count = len(response.json()) if isinstance(response.json(), list) else len(legacy_rows)
-                return count, (
-                    f"Saved {count} leads to your account. "
-                    "Note for admin: run supabase_schema_v2.sql in Supabase to fully separate every user's leads."
-                )
-        if response.status_code in (200, 201):
-            inserted_count = len(response.json()) if isinstance(response.json(), list) else len(cleaned_rows)
-            return inserted_count, f"Successfully saved {inserted_count} leads to Supabase."
-        
-        # If upsert fails because of missing unique constraint, retry with standard insert
-        if response.status_code == 400:
-            headers.pop("Prefer", None)
+    # Strategy ladder, most precise first. Each step down covers an older
+    # database state: the per-user unique rule from supabase_schema_v2.sql,
+    # then the original global URL rule, then a table without the v2
+    # ownership columns at all, then a plain insert for a table with no
+    # unique rule. A 401 means the sign-in token died and no strategy can
+    # work, so it is reported at once instead of being retried.
+    strategies = []
+    if has_ownership:
+        strategies.append((cleaned_rows, "user_id,url", False))
+    strategies.append((cleaned_rows, "url", False))
+    if has_ownership:
+        strategies.append((legacy_rows, "url", True))
+    strategies.append((cleaned_rows, None, False))
+    if has_ownership:
+        strategies.append((legacy_rows, None, True))
+
+    last_status = None
+    last_text = ""
+    for rows, on_conflict, is_legacy in strategies:
+        headers = _get_headers(access_token)
+        if on_conflict:
+            headers["Prefer"] = "resolution=merge-duplicates,return=representation"
+            url = f"{base_url}?on_conflict={on_conflict}"
+        else:
             headers["Prefer"] = "return=representation"
-            fallback_response = requests.post(url, headers=headers, json=cleaned_rows, timeout=20)
-            if fallback_response.status_code in (200, 201):
-                count = len(fallback_response.json()) if isinstance(fallback_response.json(), list) else len(cleaned_rows)
-                return count, f"Successfully inserted {count} leads to Supabase."
-            return 0, f"Supabase insert failed: {fallback_response.text[:200]}"
+            url = base_url
+        try:
+            response = requests.post(url, headers=headers, json=rows, timeout=20)
+        except Exception as e:
+            return 0, f"Error saving to Supabase: {e}"
+        if response.status_code in (200, 201):
+            try:
+                count = len(response.json())
+            except Exception:
+                count = len(rows)
+            if is_legacy:
+                return count, (
+                    f"Saved {count} leads. Admin note: run supabase_schema_v2.sql "
+                    "in Supabase so every user's leads are stored under their own account."
+                )
+            return count, f"Successfully saved {count} leads to Supabase."
+        if response.status_code == 401:
+            return 0, (
+                "AUTH_EXPIRED: your sign in session has expired, so these leads "
+                "could not be saved. Sign out and sign in again, then run the hunt once more."
+            )
+        last_status, last_text = response.status_code, response.text[:200]
 
-        return 0, f"Supabase error ({response.status_code}): {response.text[:200]}"
-    except Exception as e:
-        return 0, f"Error saving to Supabase: {e}"
+    return 0, f"Supabase insert failed ({last_status}): {last_text}"
 
 
 def fetch_leads_from_supabase(
@@ -232,6 +265,11 @@ def fetch_leads_from_supabase(
         if response.status_code == 200:
             data = response.json()
             return data, f"Loaded {len(data)} leads from Supabase."
+        if response.status_code == 401:
+            return [], (
+                "AUTH_EXPIRED: your sign in session has expired, so your saved "
+                "leads could not be loaded. Sign out and sign in again."
+            )
         # user_id column missing (v2 SQL not run yet) -> fall back to unfiltered
         # only when the caller is not relying on isolation being enforced by SQL.
         if response.status_code == 400 and user_id:
@@ -239,7 +277,10 @@ def fetch_leads_from_supabase(
             fallback_url = f"{_clean_base_url()}/rest/v1/leads?{fallback_query}"
             fallback = requests.get(fallback_url, headers=_get_headers(access_token), timeout=15)
             if fallback.status_code == 200:
-                return fallback.json(), "Loaded leads (admin: run supabase_schema_v2.sql to enable per-user separation)."
+                return fallback.json(), (
+                    "LEGACY_SCHEMA: leads were saved before user accounts were "
+                    "enabled. Admin: run supabase_schema_v2.sql in Supabase to enable per-user separation."
+                )
         return [], f"Failed to load leads ({response.status_code}): {response.text[:200]}"
     except Exception as e:
         return [], f"Error querying Supabase: {e}"

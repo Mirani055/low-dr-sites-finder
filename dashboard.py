@@ -27,6 +27,7 @@ from auth import (
     google_sign_in_url,
     is_admin,
     is_auth_configured,
+    refresh_session,
     resend_confirmation,
     sign_in,
     sign_up,
@@ -499,6 +500,30 @@ if not user:
 # =============================================================
 
 ensure_profile(user)
+
+# Access tokens expire after about an hour. If this session's token is dead
+# or close to it, quietly exchange the refresh token for a fresh one, so
+# saving and loading leads never fails just because the tab sat open.
+try:
+    import base64 as _b64
+    import json as _json
+    import time as _time
+
+    _token_parts = (user.get("access_token") or "").split(".")
+    if len(_token_parts) == 3 and user.get("refresh_token"):
+        _payload = _token_parts[1]
+        _payload += "=" * (-len(_payload) % 4)
+        _expires_at = _json.loads(_b64.urlsafe_b64decode(_payload)).get("exp", 0)
+        if _expires_at and _expires_at - _time.time() < 300:
+            _fresh = refresh_session(user["refresh_token"])
+            if _fresh and _fresh.get("access_token"):
+                user["access_token"] = _fresh["access_token"]
+                if _fresh.get("refresh_token"):
+                    user["refresh_token"] = _fresh["refresh_token"]
+                st.session_state["auth_user"] = user
+except Exception:
+    pass
+
 user_is_admin = is_admin(user)
 
 if st.session_state.get("show_welcome"):
@@ -661,10 +686,12 @@ with tab_hunt:
                                 access_token=user.get("access_token"),
                             )
                             st.session_state["supabase_sync_msg"] = msg
+                            st.session_state["supabase_sync_ok"] = saved_count > 0
                     else:
                         st.session_state.pop("export_name", None)
                         st.session_state.pop("export_data", None)
                         st.session_state.pop("supabase_sync_msg", None)
+                        st.session_state.pop("supabase_sync_ok", None)
 
                     status.update(
                         label=f"Completed in {time.time() - started_at:.1f} seconds",
@@ -703,7 +730,13 @@ with tab_hunt:
         metric_cols[3].metric("With social links", with_social)
 
         if st.session_state.get("supabase_sync_msg"):
-            st.success(st.session_state["supabase_sync_msg"])
+            if st.session_state.get("supabase_sync_ok"):
+                st.success(st.session_state["supabase_sync_msg"])
+            else:
+                st.error(
+                    "Your leads were found but could not be saved to your account. "
+                    + st.session_state["supabase_sync_msg"].replace("AUTH_EXPIRED: ", "")
+                )
 
         st.caption(
             "Scores from zero through your selected maximum are included, and every score shown "
@@ -833,7 +866,13 @@ with tab_my_leads:
                         else:
                             st.error(message)
         else:
-            st.info("Nothing here yet. Run a hunt in Hunt Leads and your results will be saved here automatically.")
+            if status_msg.startswith(("Failed to load", "Error querying", "AUTH_EXPIRED", "Supabase is not")):
+                st.error("We could not load your saved leads. " + status_msg.replace("AUTH_EXPIRED: ", ""))
+            elif status_msg.startswith("LEGACY_SCHEMA"):
+                st.warning(status_msg.replace("LEGACY_SCHEMA: ", ""))
+                st.info("Nothing here yet. Run a hunt in Hunt Leads and your results will be saved here automatically.")
+            else:
+                st.info("Nothing here yet. Run a hunt in Hunt Leads and your results will be saved here automatically.")
 
 
 # =============================================================
